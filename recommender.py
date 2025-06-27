@@ -1,38 +1,26 @@
 import pandas as pd
-import pickle
-from surprise import Dataset, Reader, SVD
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import linear_kernel
 
-def load_data(movies_path, ratings_path):
-    movies_df = pd.read_csv(movies_path)
-    ratings_df = pd.read_csv(ratings_path)
-    return movies_df, ratings_df
+# Load and clean movie data
+def load_movie_data(path="movies.csv"):
+    df = pd.read_csv(path)
+    df = df[df['genres'] != '(no genres listed)'].copy()
+    df['genres'] = df['genres'].str.replace('|', ' ')
+    return df
 
-def train_and_save_model(ratings_df, model_path="svd_model.pkl"):
-    reader = Reader(rating_scale=(0.5, 5.0))
-    data = Dataset.load_from_df(ratings_df[['userId', 'movieId', 'rating']], reader)
-    trainset = data.build_full_trainset()
-    model = SVD()
-    model.fit(trainset)
-    with open(model_path, "wb") as f:
-        pickle.dump(model, f)
-    return model
+# Build TF-IDF matrix
+def build_similarity_model(df):
+    tfidf = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = tfidf.fit_transform(df['genres'])
+    similarity = linear_kernel(tfidf_matrix, tfidf_matrix)
+    return similarity
 
-def load_model(model_path="svd_model.pkl"):
-    with open(model_path, "rb") as f:
-        return pickle.load(f)
+# Recommend movies based on input title
+def recommend_movies(title, df, similarity_matrix, top_n=5):
+    idx = df[df['title'] == title].index[0]
+    sim_scores = list(enumerate(similarity_matrix[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:top_n+1]
+    movie_indices = [i[0] for i in sim_scores]
+    return df['title'].iloc[movie_indices].tolist()
 
-def get_top_recommendations(model, user_ratings, movie_titles, ratings_df, top_n=5):
-    rated_movie_ids = set(user_ratings.keys())
-    all_movie_ids = set(movie_titles.keys())
-
-    # Fake user ID for prediction
-    user_id = 9999
-
-    predictions = []
-    for movie_id in all_movie_ids - rated_movie_ids:
-        pred = model.predict(user_id, movie_id, r_ui=0)
-        predictions.append((movie_id, pred.est))
-
-    predictions.sort(key=lambda x: x[1], reverse=True)
-    top_movies = [(movie_titles[mid], score) for mid, score in predictions[:top_n]]
-    return top_movies
